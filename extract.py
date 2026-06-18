@@ -2,22 +2,21 @@
 Cinesis Good Fit Test — Part A: Extract structured driver profile from transcript.
 
 This module handles non-deterministic extraction safely by using temperature=0,
-schema validation, bounds checking, and the official Anthropic SDK for automatic 
-retries on transient API failures (e.g., HTTP 529).
+schema validation, bounds checking, and the official Google GenAI SDK.
 """
 
 import json
 import logging
-import os, sys
+import os
 from dataclasses import dataclass
 from pathlib import Path
-import anthropic
-import openpyxl
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-MODEL = "claude-3-5-sonnet-20240620"  # Assuming standard naming convention
+MODEL = "gemini-2.5-flash"
 MAX_TOKENS = 1024
 EXTRACTION_TEMPERATURE = 0
 
@@ -64,8 +63,6 @@ Rules:
 - weight_capacity_lb: infer from equipment type if not stated. A hotshot gooseneck typically handles up to ~16,500 lb of cargo.
 - weight_capacity_note: explain your inference
 
-Return ONLY valid JSON. No preamble, no markdown fences.
-
 TRANSCRIPT:
 {transcript}
 """
@@ -95,26 +92,27 @@ def _validate_profile(parsed: dict) -> None:
 
 
 def extract_profile_via_llm(api_key: str, transcript: str) -> DriverProfile:
-    """Calls Anthropic SDK to extract the profile and validates the result."""
-    client = anthropic.Anthropic(api_key=api_key)
+    """Calls Gemini API to extract the profile and validates the result."""
+    logger.info(f"Calling Gemini API ({MODEL}) for profile extraction...")
     
-    logger.info("Calling Anthropic API for profile extraction...")
-    response = client.messages.create(
+    # New SDK initialization
+    client = genai.Client(api_key=api_key)
+    
+    # New SDK generation call
+    response = client.models.generate_content(
         model=MODEL,
-        max_tokens=MAX_TOKENS,
-        temperature=EXTRACTION_TEMPERATURE,
-        messages=[{"role": "user", "content": build_extraction_prompt(transcript)}],
+        contents=build_extraction_prompt(transcript),
+        config=types.GenerateContentConfig(
+            temperature=EXTRACTION_TEMPERATURE,
+            max_output_tokens=MAX_TOKENS,
+            response_mime_type="application/json",
+        )
     )
     
-    # Safely handle the response block (checking for 'text' block type)
-    text_blocks = [b.text for b in response.content if b.type == "text"]
-    if not text_blocks:
-        raise ValueError(
-            f"No text block in API response. Stop reason: {response.stop_reason}. "
-            f"Content types: {[b.type for b in response.content]}"
-        )
+    if not response.text:
+        raise ValueError("No text block in API response from Gemini.")
         
-    raw = text_blocks[0].strip()
+    raw = response.text.strip()
     parsed = json.loads(raw)
     
     # Validate the data before trusting it
@@ -133,18 +131,17 @@ def extract_profile_via_llm(api_key: str, transcript: str) -> DriverProfile:
         weight_capacity_note=parsed.get("weight_capacity_note", ""),
     )
 
-
 def get_driver_profile(transcript: str) -> DriverProfile:
     """
     Retrieve the driver profile from the transcript.
-    The API key is read from the ANTHROPIC_API_KEY environment variable.
+    The API key is read from the GEMINI_API_KEY environment variable.
     Raises EnvironmentError if the key is absent.
     Raises RuntimeError if the LLM call or JSON parsing fails.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError(
-            "ANTHROPIC_API_KEY environment variable is not set. "
+            "GEMINI_API_KEY environment variable is not set. "
             "Set it before running this script."
         )
         
@@ -158,9 +155,10 @@ def get_driver_profile(transcript: str) -> DriverProfile:
 
 
 if __name__ == "__main__":
+    import openpyxl
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     
-    # Provide a sample transcript for local testing if not piped via stdin
+    # Provide a sample transcript for local testing if Excel fails
     SAMPLE_TRANSCRIPT = """
     Driver: Like, tell me a little bit about how y'all can assist me.
     Dispatch: I think you're based out in San Antonio. Is that correct?
@@ -171,7 +169,7 @@ if __name__ == "__main__":
     Driver: I might only run two or three days a week, but I still make good money—like $2,300 to $2,500 going Corpus to Odessa, or $1,800 to $2,000 from San Antonio to Midland. I run a hotshot gooseneck trailer.
     Driver: As long as it's above $2 per mile, I'll consider it.
     """
-
+    
     TARGET_FILE = Path(__file__).parent / "cinesis_good_fit_test_clean.xlsx"
     transcript_text = SAMPLE_TRANSCRIPT
     
@@ -197,7 +195,6 @@ if __name__ == "__main__":
         
     p = get_driver_profile(transcript_text)
     
-    # Use print for intended program output
     print(f"\nDriver Profile")
     print(f"  Current location : {p.current_location}  ({p.current_lat}, {p.current_lon})")
     print(f"  Home base        : {p.home_base}  ({p.home_lat}, {p.home_lon})")
