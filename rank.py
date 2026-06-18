@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
 import openpyxl
+from dotenv import load_dotenv
+load_dotenv()
 
 from extract import get_driver_profile, DriverProfile
 
