@@ -3,13 +3,15 @@ Cinesis Good Fit Test — Part B: Filter and rank loads dynamically.
 
 Pipeline:
   1. Load the load board dynamically from the target .xlsx file.
-  2. Hard-filter by data completeness, equipment, and strict weight bounds.
-  3. Compute effective rate/mile over 3 haversine legs.
-  4. Drop loads below the driver's minimum effective rate.
-  5. Rank remaining descending, print top 3.
+  2. Load the conversation transcript dynamically from the same .xlsx file.
+  3. Hard-filter by data completeness, equipment, and strict weight bounds.
+  4. Compute effective rate/mile over 3 haversine legs.
+  5. Drop loads below the driver's minimum effective rate.
+  6. Rank remaining descending, print top 3.
 """
 
 import logging
+import os
 from math import radians, sin, cos, asin, sqrt
 from dataclasses import dataclass
 from typing import Optional
@@ -34,7 +36,7 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 
 
 # ---------------------------------------------------------------------------
-# Loads board dynamic ingestion
+# Dynamic Excel Ingestion (Loads & Transcript)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -74,17 +76,16 @@ def _parse_optional_str(val) -> Optional[str]:
 
 def load_board_from_xlsx(path: str) -> list[Load]:
     """Reads the load board dynamically from the spreadsheet."""
-    logger.info(f"Loading board from {path}")
+    logger.info(f"Loading load board from {path}")
     try:
         wb = openpyxl.load_workbook(path, data_only=True)
     except FileNotFoundError:
         raise FileNotFoundError(
             f"\n\n[CRITICAL] Excel file not found at: {path}\n"
-            f"Please ensure you have downloaded the 'cinesis_good_fit_test_clean.xlsx' "
-            f"file and placed it in the exact same directory as this script."
+            f"Please ensure you have downloaded the target Excel file "
+            f"and placed it in the exact same directory as this script."
         )
         
-    # Check if the 'Loads' sheet exists to prevent a raw KeyError
     if "Loads" not in wb.sheetnames:
         raise ValueError(
             f"\n\n[ERROR] Missing 'Loads' sheet in the provided Excel file. "
@@ -111,6 +112,31 @@ def load_board_from_xlsx(path: str) -> list[Load]:
             price=_parse_optional_float(row[9]),
         ))
     return loads
+
+
+def load_transcript_from_xlsx(path: str) -> str:
+    """Reads the transcript dynamically from the 'Sample Conversation' sheet."""
+    logger.info(f"Loading transcript from {path}")
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Excel file not found at: {path}")
+
+    if "Sample Conversation" not in wb.sheetnames:
+        raise ValueError("Missing 'Sample Conversation' sheet in the provided Excel file.")
+
+    ws = wb["Sample Conversation"]
+    lines = []
+    
+    rows = list(ws.iter_rows(values_only=True))
+    for row in rows[1:]:  # skip header
+        if not row or row[0] is None:
+            continue
+        speaker = str(row[0]).strip()
+        dialogue = str(row[1]).strip()
+        lines.append(f"{speaker}: {dialogue}")
+        
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -192,10 +218,10 @@ def rank_loads(loads: list[Load], driver: DriverProfile) -> tuple[list[Result], 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     
-    # 1. Provide the exact transcript required for the assessment run
-    TRANSCRIPT_FILE = Path(__file__).parent / "cinesis_good_fit_test_clean.xlsx - Sample Conversation.csv"
+    # Define target file path
+    TARGET_FILE = Path(__file__).parent / "cinesis_good_fit_test_clean.xlsx"
     
-    # Fallback to the known string if the CSV isn't present
+    # Fallback to the known string if the Excel file isn't present
     transcript_text = """
     Driver: Like, tell me a little bit about how y'all can assist me.
     Dispatch: I think you're based out in San Antonio. Is that correct?
@@ -208,13 +234,13 @@ if __name__ == "__main__":
     Driver: As long as it's above $2 per mile, I'll consider it.
     """
     
+    # 1. Ingest Transcript
     try:
-        with open(TRANSCRIPT_FILE, 'r') as f:
-            transcript_text = f.read()
-    except FileNotFoundError:
+        transcript_text = load_transcript_from_xlsx(str(TARGET_FILE))
+    except Exception as e:
         logger.warning(
-            "\n*** TRANSCRIPT CSV NOT FOUND ***\n"
-            "Please ensure the assessment CSV files are in the same directory if you wish to test file ingestion.\n"
+            f"\n*** COULD NOT LOAD TRANSCRIPT FROM EXCEL ***\n"
+            f"Error: {e}\n"
             "Falling back to the embedded sample transcript string to continue execution...\n"
         )
 
@@ -222,8 +248,7 @@ if __name__ == "__main__":
     driver = get_driver_profile(transcript_text)
 
     # 3. Ingest Load Board
-    LOADS_PATH = Path(__file__).parent / "cinesis_good_fit_test_clean.xlsx"
-    loads = load_board_from_xlsx(str(LOADS_PATH))
+    loads = load_board_from_xlsx(str(TARGET_FILE))
 
     # 4. Rank
     all_results, eligible = rank_loads(loads, driver)
