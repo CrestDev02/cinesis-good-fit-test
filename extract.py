@@ -8,10 +8,11 @@ retries on transient API failures (e.g., HTTP 529).
 
 import json
 import logging
-import os
-import sys
+import os, sys
 from dataclasses import dataclass
+from pathlib import Path
 import anthropic
+import openpyxl
 
 logger = logging.getLogger(__name__)
 
@@ -170,16 +171,29 @@ if __name__ == "__main__":
     Driver: I might only run two or three days a week, but I still make good money—like $2,300 to $2,500 going Corpus to Odessa, or $1,800 to $2,000 from San Antonio to Midland. I run a hotshot gooseneck trailer.
     Driver: As long as it's above $2 per mile, I'll consider it.
     """
+
+    TARGET_FILE = Path(__file__).parent / "cinesis_good_fit_test_clean.xlsx"
+    transcript_text = SAMPLE_TRANSCRIPT
     
-    if not sys.stdin.isatty():
-        transcript_text = sys.stdin.read()
-    else:
+    try:
+        wb = openpyxl.load_workbook(str(TARGET_FILE), data_only=True)
+        if "Sample Conversation" in wb.sheetnames:
+            ws = wb["Sample Conversation"]
+            lines = []
+            for row in list(ws.iter_rows(values_only=True))[1:]:
+                if row and row[0] is not None:
+                    lines.append(f"{str(row[0]).strip()}: {str(row[1]).strip()}")
+            transcript_text = "\n".join(lines)
+            logger.info("Successfully loaded transcript from Excel.")
+        else:
+            logger.warning("Sheet 'Sample Conversation' not found. Using fallback transcript.")
+    except Exception as e:
         logger.warning(
-            "\n*** NO TRANSCRIPT PROVIDED VIA STDIN ***\n"
-            "To test extraction with a live file, you can pipe it in (e.g., `cat transcript.txt | python extract.py`).\n"
+            f"\n*** COULD NOT LOAD TRANSCRIPT FROM EXCEL ***\n"
+            f"Error: {e}\n"
+            "To test extraction with live data, ensure the Excel file is in the same directory.\n"
             "Falling back to the embedded sample transcript string to continue execution...\n"
         )
-        transcript_text = SAMPLE_TRANSCRIPT
         
     p = get_driver_profile(transcript_text)
     
