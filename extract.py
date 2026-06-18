@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
