@@ -4,7 +4,7 @@
 This solution mimics a production-grade dispatch pipeline, heavily prioritizing data validation, modularity, and explicit handling of edge cases.
 
 ### Part A — Extraction (`extract.py`)
-Profiles are extracted using `claude-3-5-sonnet-20240620` via the official Anthropic Python SDK. 
+Profiles are extracted using `gemini-2.5-flash` via the official Google's GenAI SDK. 
 * **Deterministic Configuration:** Uses `temperature=0` alongside structured JSON extraction with strict validation for reliable programmatic ingestion.
 * **Safety & Resilience:** The SDK natively handles retries (e.g., HTTP 529s). Extracted JSON undergoes a strict `_validate_profile` bounds check (verifying valid coordinate boundaries and positive weight limits) to prevent silent hallucinations from corrupting downstream routing.
 
